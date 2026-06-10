@@ -1,0 +1,12 @@
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Cloudflare Wrangler
+.wrangler/
+.dev.vars
+
+# IDEs and OS files
+.vscode/
+.DS_Store
+Thumbs.db
