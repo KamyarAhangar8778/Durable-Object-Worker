@@ -23,6 +23,12 @@
 			}
 		]
 	},
+	"kv_namespaces": [
+		{
+			"binding": "DASH_KV",
+			"id": "2e4f6e5bd47a4f6589be92e3ab38c793"
+		}
+	],
 	"observability": {
 		"enabled": true
 	},
