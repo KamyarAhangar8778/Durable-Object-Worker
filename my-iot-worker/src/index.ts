@@ -32,7 +32,34 @@ export default {
 		const path = url.pathname.split("/").filter(Boolean);
 		const method = request.method.toUpperCase();
 
-		// ==== 1. مسیر مربوط به تنظیمات اصلی پروژه (Cloudflare KV) ====
+		const corsHeaders = {
+			"Access-Control-Allow-Origin": "*",
+			"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+		};
+
+		// Handle CORS preflight requests
+		if (method === "OPTIONS") {
+			return new Response(null, {
+				status: 204,
+				headers: corsHeaders,
+			});
+		}
+
+		const handleResponse = (res: Response) => {
+			const headers = new Headers(res.headers);
+			for (const [key, value] of Object.entries(corsHeaders)) {
+				headers.set(key, value);
+			}
+			return new Response(res.body, {
+				status: res.status,
+				statusText: res.statusText,
+				headers,
+			});
+		};
+
+		const response: Response = await (async (): Promise<Response> => {
+			// ==== 1. مسیر مربوط به تنظیمات اصلی پروژه (Cloudflare KV) ====
 		if (path[0] === "config") {
 			const configKey = "main_config"; // تنها یک کلید ثابت برای کل تنظیمات
 
@@ -85,7 +112,7 @@ export default {
 			const stub = env.MY_DURABLE_OBJECT.getByName("dashboard_state");
 
 			if (method === "GET") {
-				const result = await stub.getState();
+				const result = await (stub as any).getState();
 				return new Response(JSON.stringify(result), {
 					headers: { "Content-Type": "application/json" },
 				});
@@ -93,7 +120,7 @@ export default {
 
 			if (method === "POST") {
 				const body = (await request.json()) as Record<string, any>;
-				const result = await stub.setState(body);
+				const result = await (stub as any).setState(body);
 				return new Response(JSON.stringify(result), {
 					headers: { "Content-Type": "application/json" },
 				});
@@ -114,7 +141,7 @@ export default {
 			const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + pinId);
 
 			if (method === "GET") {
-				const result = await stub.getState();
+				const result = await (stub as any).getState();
 				return new Response(JSON.stringify(result), {
 					headers: { "Content-Type": "application/json" },
 				});
@@ -126,7 +153,7 @@ export default {
 					return new Response("Invalid body, 'value' must be boolean", { status: 400 });
 				}
 				// ذخیره مقدار به صورت کلید و مقدار
-				const result = await stub.setState({ value: body.value });
+				const result = await (stub as any).setState({ value: body.value });
 				return new Response(JSON.stringify(result), {
 					headers: { "Content-Type": "application/json" },
 				});
@@ -137,5 +164,8 @@ export default {
 
 		// اگر مسیر شناخته شده نباشد
 		return new Response("Not Found", { status: 404 });
+		})();
+
+		return handleResponse(response);
 	},
 } satisfies ExportedHandler<Env>;
