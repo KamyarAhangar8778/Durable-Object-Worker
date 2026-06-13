@@ -24,6 +24,16 @@ export class MyDurableObject extends DurableObject {
 }
 
 /**
+ * ساخت پاسخ JSON استاندارد با ساختار ACK
+ */
+function jsonResponse(body: object, status = 200): Response {
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: { "Content-Type": "application/json" },
+	});
+}
+
+/**
  * Worker اصلی که مسیرها را مدیریت می‌کند
  */
 export default {
@@ -70,7 +80,8 @@ export default {
 				if (path[1] === "esp") {
 					try {
 						const parsed = JSON.parse(value || "{}");
-						const segments = parsed?.payload?.segments_definition || [];
+						const data = parsed?.payload || parsed || {};
+						const segments = data.segments_definition || data.segments || [];
 						
 						// فیلتر کردن و فقط برگرداندن شناسه، type و pin برای سرعت بیشتر ESP
 						const filtered = segments.map((seg: any) => ({
@@ -79,13 +90,9 @@ export default {
 							pin: seg.pin
 						}));
 						
-						return new Response(JSON.stringify(filtered), {
-							headers: { "Content-Type": "application/json" },
-						});
+						return jsonResponse(filtered);
 					} catch (e) {
-						return new Response(JSON.stringify([]), {
-							headers: { "Content-Type": "application/json" },
-						});
+						return jsonResponse([]);
 					}
 				}
 
@@ -96,11 +103,19 @@ export default {
 			}
 
 			if (method === "POST" && !path[1]) {
-				const bodyText = await request.text();
-				await env.DASH_KV.put(configKey, bodyText);
-				return new Response(JSON.stringify({ success: true, message: "Settings saved" }), {
-					headers: { "Content-Type": "application/json" },
-				});
+				try {
+					const bodyText = await request.text();
+					await env.DASH_KV.put(configKey, bodyText);
+					return jsonResponse({
+						ack: true,
+						message: "تنظیمات با موفقیت در سرور ذخیره شد.",
+					});
+				} catch (e) {
+					return jsonResponse({
+						ack: false,
+						error: "خطا در ذخیره تنظیمات در KV.",
+					}, 500);
+				}
 			}
 
 			return new Response("Method Not Allowed", { status: 405 });
@@ -113,17 +128,24 @@ export default {
 
 			if (method === "GET") {
 				const result = await (stub as any).getState();
-				return new Response(JSON.stringify(result), {
-					headers: { "Content-Type": "application/json" },
-				});
+				return jsonResponse(result);
 			}
 
 			if (method === "POST") {
-				const body = (await request.json()) as Record<string, any>;
-				const result = await (stub as any).setState(body);
-				return new Response(JSON.stringify(result), {
-					headers: { "Content-Type": "application/json" },
-				});
+				try {
+					const body = (await request.json()) as Record<string, any>;
+					const result = await (stub as any).setState(body);
+					return jsonResponse({
+						ack: true,
+						message: "وضعیت داشبورد با موفقیت به‌روزرسانی شد.",
+						data: result,
+					});
+				} catch (e) {
+					return jsonResponse({
+						ack: false,
+						error: "خطا در به‌روزرسانی وضعیت داشبورد.",
+					}, 500);
+				}
 			}
 
 			return new Response("Method Not Allowed", { status: 405 });
@@ -134,7 +156,7 @@ export default {
 			const pinId = path[1];
 
 			if (!pinId) {
-				return new Response("Pin ID required", { status: 400 });
+				return jsonResponse({ ack: false, error: "Pin ID required" }, 400);
 			}
 
 			// ایجاد یک نمونه مجزا برای هر پین
@@ -142,21 +164,31 @@ export default {
 
 			if (method === "GET") {
 				const result = await (stub as any).getState();
-				return new Response(JSON.stringify(result), {
-					headers: { "Content-Type": "application/json" },
-				});
+				return jsonResponse(result);
 			}
 
 			if (method === "POST") {
-				const body = (await request.json()) as { value?: unknown };
-				if (typeof body.value !== "boolean") {
-					return new Response("Invalid body, 'value' must be boolean", { status: 400 });
+				try {
+					const body = (await request.json()) as { value?: unknown };
+					if (typeof body.value !== "boolean") {
+						return jsonResponse({
+							ack: false,
+							error: "Invalid body, 'value' must be boolean",
+						}, 400);
+					}
+					// ذخیره مقدار به صورت کلید و مقدار
+					const result = await (stub as any).setState({ value: body.value });
+					return jsonResponse({
+						ack: true,
+						message: `وضعیت پین ${pinId} با موفقیت ذخیره شد.`,
+						data: result,
+					});
+				} catch (e) {
+					return jsonResponse({
+						ack: false,
+						error: `خطا در ذخیره وضعیت پین ${pinId}.`,
+					}, 500);
 				}
-				// ذخیره مقدار به صورت کلید و مقدار
-				const result = await (stub as any).setState({ value: body.value });
-				return new Response(JSON.stringify(result), {
-					headers: { "Content-Type": "application/json" },
-				});
 			}
 
 			return new Response("Method Not Allowed", { status: 405 });
