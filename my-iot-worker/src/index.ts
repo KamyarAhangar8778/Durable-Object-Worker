@@ -83,11 +83,16 @@ export default {
 						const data = parsed?.payload || parsed || {};
 						const segments = data.segments_definition || data.segments || [];
 						
-						// فیلتر کردن و فقط برگرداندن شناسه، type و pin برای سرعت بیشتر ESP
-						const filtered = segments.map((seg: any) => ({
-							id: seg.id,
-							type: seg.type,
-							pin: seg.pin
+						// فیلتر کردن و فقط برگرداندن شناسه، type، pin و value برای سرعت بیشتر ESP
+						const filtered = await Promise.all(segments.map(async (seg: any) => {
+							const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + seg.pin);
+							const state = await (stub as any).getState();
+							return {
+								id: seg.id,
+								type: seg.type,
+								pin: seg.pin,
+								value: state.value || false
+							};
 						}));
 						
 						return jsonResponse(filtered);
