@@ -13,6 +13,12 @@
 				"MyDurableObject"
 			],
 			"tag": "v1"
+		},
+		{
+			"new_sqlite_classes": [
+				"WebSocketHub"
+			],
+			"tag": "v2"
 		}
 	],
 	"durable_objects": {
@@ -20,6 +26,10 @@
 			{
 				"class_name": "MyDurableObject",
 				"name": "MY_DURABLE_OBJECT"
+			},
+			{
+				"class_name": "WebSocketHub",
+				"name": "WEBSOCKET_HUB"
 			}
 		]
 	},
