@@ -223,7 +223,7 @@ export default {
 					// انتشار به هاب WebSocket
 					try {
 						const hubStub = env.WEBSOCKET_HUB.getByName("global_hub");
-						await (hubStub as any).broadcast(JSON.stringify({ id: `module_${pinId}`, value: body.value }));
+						await (hubStub as any).broadcast(JSON.stringify({ id: pinId, value: body.value }));
 					} catch (e) {
 						console.error("خطا در ارسال پیام WebSocket", e);
 					}
