@@ -19,6 +19,12 @@
 				"WebSocketHub"
 			],
 			"tag": "v2"
+		},
+		{
+			"deleted_classes": [
+				"WebSocketHub"
+			],
+			"tag": "v3"
 		}
 	],
 	"durable_objects": {
@@ -26,10 +32,6 @@
 			{
 				"class_name": "MyDurableObject",
 				"name": "MY_DURABLE_OBJECT"
-			},
-			{
-				"class_name": "WebSocketHub",
-				"name": "WEBSOCKET_HUB"
 			}
 		]
 	},
