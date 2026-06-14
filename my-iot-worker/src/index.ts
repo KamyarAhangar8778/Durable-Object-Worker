@@ -23,42 +23,7 @@ export class MyDurableObject extends DurableObject {
 	}
 }
 
-/**
- * Durable Object برای مدیریت اتصالات WebSocket
- */
-export class WebSocketHub extends DurableObject {
-	constructor(ctx: DurableObjectState, env: Env) {
-		super(ctx, env);
-	}
 
-	async fetch(request: Request) {
-		const url = new URL(request.url);
-
-		// ایجاد جفت WebSocket
-		const webSocketPair = new WebSocketPair();
-		const [client, server] = Object.values(webSocketPair);
-
-		// اتصال سمت سرور را می‌پذیریم و به State معرفی می‌کنیم
-		this.ctx.acceptWebSocket(server);
-
-		return new Response(null, {
-			status: 101,
-			webSocket: client,
-		});
-	}
-
-	// متدی برای پخش پیام به همه متصل‌ها
-	async broadcast(message: string) {
-		const sockets = this.ctx.getWebSockets();
-		for (const ws of sockets) {
-			try {
-				ws.send(message);
-			} catch (err) {
-				// خطا در ارسال (مثلاً کلاینت قطع شده است)
-			}
-		}
-	}
-}
 /**
  * ساخت پاسخ JSON استاندارد با ساختار ACK
  */
@@ -220,13 +185,7 @@ export default {
 					// ذخیره مقدار به صورت کلید و مقدار
 					const result = await (stub as any).setState({ value: body.value });
 
-					// انتشار به هاب WebSocket
-					try {
-						const hubStub = env.WEBSOCKET_HUB.getByName("global_hub");
-						await (hubStub as any).broadcast(JSON.stringify({ id: pinId, value: body.value }));
-					} catch (e) {
-						console.error("خطا در ارسال پیام WebSocket", e);
-					}
+					// انتشار به هاب WebSocket حذف شد زیرا از MQTT استفاده می‌شود
 
 					return jsonResponse({
 						ack: true,
@@ -244,14 +203,7 @@ export default {
 			return new Response("Method Not Allowed", { status: 405 });
 		}
 
-		// ==== 4. مسیر WebSocket برای ESP ====
-		if (path[0] === "ws" && path[1] === "esp") {
-			if (request.headers.get("Upgrade") !== "websocket") {
-				return new Response("Expected Upgrade: websocket", { status: 426 });
-			}
-			const hubStub = env.WEBSOCKET_HUB.getByName("global_hub");
-			return hubStub.fetch(request);
-		}
+
 
 		// اگر مسیر شناخته شده نباشد
 		return new Response("Not Found", { status: 404 });
