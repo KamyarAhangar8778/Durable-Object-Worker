@@ -92,6 +92,7 @@ export default {
 								id: seg.id,
 								type: seg.type,
 								pin: seg.pin,
+								auto_off: seg.auto_off || 0,
 								value: state.value || false
 							};
 						}));
