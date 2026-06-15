@@ -93,7 +93,8 @@ export default {
 								type: seg.type,
 								pin: seg.pin,
 								auto_off: seg.auto_off || 0,
-								value: state.value || false
+								value: state.value || false,
+								rule: seg.rule || null
 							};
 						}));
 						
