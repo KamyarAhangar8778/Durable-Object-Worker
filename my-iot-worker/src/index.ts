@@ -1,4 +1,38 @@
 import { DurableObject } from "cloudflare:workers";
+import { publishMqtt } from "./mqttClient";
+
+function getNextTriggerTimestamp(timeStr: string, daysArray: number[]): number | null {
+	if (!daysArray || daysArray.length === 0) return null;
+	const [hours, minutes] = timeStr.split(':').map(Number);
+	
+	const now = new Date();
+	const tehranOffsetMs = 3.5 * 60 * 60 * 1000;
+	const nowTehran = new Date(now.getTime() + tehranOffsetMs);
+	
+	let bestDelay = Infinity;
+	
+	for (const day of daysArray) {
+		let dayDiff = day - nowTehran.getUTCDay();
+		if (dayDiff < 0) dayDiff += 7;
+		
+		let candidate = new Date(nowTehran);
+		candidate.setUTCDate(candidate.getUTCDate() + dayDiff);
+		candidate.setUTCHours(hours, minutes, 0, 0);
+		
+		// If it's today but the time has already passed, add 7 days
+		if (dayDiff === 0 && candidate.getTime() <= nowTehran.getTime()) {
+			candidate.setUTCDate(candidate.getUTCDate() + 7);
+		}
+		
+		const delay = candidate.getTime() - nowTehran.getTime();
+		if (delay < bestDelay) {
+			bestDelay = delay;
+		}
+	}
+	
+	if (bestDelay === Infinity) return null;
+	return now.getTime() + bestDelay;
+}
 
 /**
  * Durable Object برای نگهداری وضعیت ماژول‌های پین
@@ -20,6 +54,63 @@ export class MyDurableObject extends DurableObject {
 		const updated = { ...current, ...newData };
 		await this.ctx.storage.put("data", updated);
 		return updated;
+	}
+
+	async updateAutomations(automations: any[]) {
+		await this.ctx.storage.put("automations", automations);
+		await this.scheduleNextAlarm();
+	}
+
+	async scheduleNextAlarm() {
+		const automations = (await this.ctx.storage.get<any[]>("automations")) || [];
+		const activeAutomations = automations.filter(a => a.enabled);
+
+		if (activeAutomations.length === 0) {
+			await this.ctx.storage.deleteAlarm();
+			return;
+		}
+
+		let nextTime = Infinity;
+
+		for (const auto of activeAutomations) {
+			const triggerTime = getNextTriggerTimestamp(auto.time, auto.days);
+			if (triggerTime !== null && triggerTime < nextTime) {
+				nextTime = triggerTime;
+			}
+		}
+
+		if (nextTime !== Infinity) {
+			const autoIds = activeAutomations
+				.filter(auto => getNextTriggerTimestamp(auto.time, auto.days) === nextTime)
+				.map(auto => auto.id);
+
+			await this.ctx.storage.put("nextAlarmTime", nextTime);
+			await this.ctx.storage.put("nextAlarmIds", autoIds);
+			await this.ctx.storage.setAlarm(nextTime);
+		} else {
+			await this.ctx.storage.deleteAlarm();
+		}
+	}
+
+	async alarm() {
+		const automations = (await this.ctx.storage.get<any[]>("automations")) || [];
+		const nextAlarmIds = (await this.ctx.storage.get<string[]>("nextAlarmIds")) || [];
+
+		// Filter to the ones that just fired
+		const fired = automations.filter(a => nextAlarmIds.includes(a.id));
+
+		for (const auto of fired) {
+			// Publish MQTT command: CMD_TOGGLE = 0x01
+			// Payload: [0x01, targetPin, actionOn]
+			const targetPin = parseInt(auto.targetPin, 10);
+			if (!isNaN(targetPin)) {
+				const payload = new Uint8Array([0x01, targetPin, auto.actionOn ? 1 : 0]);
+				await publishMqtt("KamyarIoT/Achaemenid/Command", payload);
+			}
+		}
+
+		// Schedule next
+		await this.scheduleNextAlarm();
 	}
 }
 
@@ -77,30 +168,79 @@ export default {
 			if (method === "GET") {
 				const value = await env.DASH_KV.get(configKey);
 
-				// اگر زیرمسیر esp بود، داده‌ها را فیلتر کن
+				// اگر زیرمسیر esp بود، داده‌ها را با فرمت متنی سفارشی برگردان
 				if (path[1] === "esp") {
 					try {
 						const parsed = JSON.parse(value || "{}");
 						const data = parsed?.payload || parsed || {};
 						const segments = data.segments_definition || data.segments || [];
 						
-						// فیلتر کردن و فقط برگرداندن شناسه، type، pin و value برای سرعت بیشتر ESP
-						const filtered = await Promise.all(segments.map(async (seg: any) => {
+						let responseText = "ESP_CFG_V1\n";
+
+						await Promise.all(segments.map(async (seg: any) => {
 							const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + seg.pin);
 							const state = await (stub as any).getState();
-							return {
-								id: seg.id,
-								type: seg.type,
-								pin: seg.pin,
-								auto_off: seg.auto_off || 0,
-								value: state.value || false,
-								rule: seg.rule || null
-							};
+							
+							const pinVal = state.value ? 1 : 0;
+							const autoOff = seg.auto_off || 0;
+							
+							responseText += `S:${seg.id}:${seg.type}:${seg.pin}:${pinVal}:${autoOff}\n`;
+							
+							if (seg.rule) {
+								let hCount = 0;
+								let lCount = 0;
+								let hActions: any[] = [];
+								let lActions: any[] = [];
+
+								if (seg.rule.highActions) {
+									hCount = Math.min(4, seg.rule.highActions.length);
+									hActions = seg.rule.highActions.slice(0, hCount);
+								}
+								if (seg.rule.lowActions) {
+									lCount = Math.min(4, seg.rule.lowActions.length);
+									lActions = seg.rule.lowActions.slice(0, lCount);
+								}
+
+								// Backward compatibility
+								if (hCount === 0 && lCount === 0 && seg.rule.targetPin !== undefined && seg.rule.targetPin !== null) {
+									const oldTarget = seg.rule.targetPin;
+									const oldTrigger = seg.rule.triggerState ?? true;
+									const oldAction = seg.rule.actionState ?? true;
+									if (oldTrigger) {
+										hCount = 1;
+										hActions = [{targetPin: oldTarget, actionOn: oldAction}];
+									} else {
+										lCount = 1;
+										lActions = [{targetPin: oldTarget, actionOn: oldAction}];
+									}
+								}
+
+								for (const a of hActions) {
+									const tPin = a.targetPin !== undefined ? a.targetPin : "";
+									const rHold = a.reqHold || a.requiredHoldTime || 0;
+									const aOn = (a.actionOn !== false && a.actionState !== false) ? 1 : 0;
+									const aType = a.actionType || 0;
+									const delay = a.delay || 0;
+									responseText += `RH:${tPin}:${rHold}:${aOn}:${aType}:${delay}\n`;
+								}
+								for (const a of lActions) {
+									const tPin = a.targetPin !== undefined ? a.targetPin : "";
+									const rHold = a.reqHold || a.requiredHoldTime || 0;
+									const aOn = (a.actionOn !== false && a.actionState !== false) ? 1 : 0;
+									const aType = a.actionType || 0;
+									const delay = a.delay || 0;
+									responseText += `RL:${tPin}:${rHold}:${aOn}:${aType}:${delay}\n`;
+								}
+							}
 						}));
 						
-						return jsonResponse(filtered);
+						return new Response(responseText, {
+							headers: { "Content-Type": "text/plain" },
+						});
 					} catch (e) {
-						return jsonResponse([]);
+						return new Response("ESP_CFG_V1\n", {
+							headers: { "Content-Type": "text/plain" },
+						});
 					}
 				}
 
@@ -114,6 +254,18 @@ export default {
 				try {
 					const bodyText = await request.text();
 					await env.DASH_KV.put(configKey, bodyText);
+					
+					// Update DO Alarms for automations
+					try {
+						const configData = JSON.parse(bodyText);
+						const automations = configData.automations || configData.payload?.automations || [];
+						const stubId = env.MY_DURABLE_OBJECT.idFromName("automations_controller");
+						const stub = env.MY_DURABLE_OBJECT.get(stubId);
+						await (stub as any).updateAutomations(automations);
+					} catch (err) {
+						console.error("Failed to update DO alarms", err);
+					}
+
 					return jsonResponse({
 						ack: true,
 						message: "تنظیمات با موفقیت در سرور ذخیره شد.",
