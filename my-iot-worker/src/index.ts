@@ -84,70 +84,44 @@ export default {
 						const data = parsed?.payload || parsed || {};
 						const segments = data.segments_definition || data.segments || [];
 						
-						let responseText = "ESP_CFG_V1\n";
+						let responseText = "ESP_CFG_V2\n";
 
-						await Promise.all(segments.map(async (seg: any) => {
+						const result = await Promise.all(segments.map(async (seg: any) => {
 							const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + seg.pin);
 							const state = await (stub as any).getState();
-							
-							const pinVal = state.value ? 1 : 0;
-							const autoOff = seg.auto_off || 0;
-							
-							responseText += `S:${seg.id}:${seg.type}:${seg.pin}:${pinVal}:${autoOff}\n`;
-							
-							if (seg.rule) {
-								let hCount = 0;
-								let lCount = 0;
-								let hActions: any[] = [];
-								let lActions: any[] = [];
+							return { config: seg, pin_number: seg.pin, state };
+						}));
 
-								if (seg.rule.highActions) {
-									hCount = Math.min(4, seg.rule.highActions.length);
-									hActions = seg.rule.highActions.slice(0, hCount);
-								}
-								if (seg.rule.lowActions) {
-									lCount = Math.min(4, seg.rule.lowActions.length);
-									lActions = seg.rule.lowActions.slice(0, lCount);
-								}
+						for (const pin of result) {
+							if (pin.config && typeof pin.pin_number === 'number') {
+								// S id=module_1 type=gpio_toggle pin=12 val=0 ao=0
+								responseText += `S id=${pin.config.id} type=${pin.config.type} pin=${pin.pin_number} val=${pin.state?.value ? 1 : 0} ao=${pin.config.autoOffDelay || 0}\n`;
 
-								// Backward compatibility
-								if (hCount === 0 && lCount === 0 && seg.rule.targetPin !== undefined && seg.rule.targetPin !== null) {
-									const oldTarget = seg.rule.targetPin;
-									const oldTrigger = seg.rule.triggerState ?? true;
-									const oldAction = seg.rule.actionState ?? true;
-									if (oldTrigger) {
-										hCount = 1;
-										hActions = [{targetPin: oldTarget, actionOn: oldAction}];
-									} else {
-										lCount = 1;
-										lActions = [{targetPin: oldTarget, actionOn: oldAction}];
+								if (pin.config.rule) {
+									if (Array.isArray(pin.config.rule.highActions)) {
+										for (const act of pin.config.rule.highActions) {
+											// RH tgt=13 hld=0 ast=1 atp=0 dly=0
+											responseText += `RH tgt=${act.targetPin} hld=${act.requiredHoldTime || 0} ast=${act.actionState ? 1 : 0} atp=${act.actionType || 0} dly=${act.delay || 0}\n`;
+										}
+									}
+									if (Array.isArray(pin.config.rule.lowActions)) {
+										for (const act of pin.config.rule.lowActions) {
+											// RL tgt=13 hld=0 ast=0 atp=0 dly=0
+											responseText += `RL tgt=${act.targetPin} hld=${act.requiredHoldTime || 0} ast=${act.actionState ? 1 : 0} atp=${act.actionType || 0} dly=${act.delay || 0}\n`;
+										}
 									}
 								}
-
-								for (const a of hActions) {
-									const tPin = a.targetPin !== undefined ? a.targetPin : "";
-									const rHold = a.reqHold || a.requiredHoldTime || 0;
-									const aOn = (a.actionOn !== false && a.actionState !== false) ? 1 : 0;
-									const aType = a.actionType || 0;
-									const delay = a.delay || 0;
-									responseText += `RH:${tPin}:${rHold}:${aOn}:${aType}:${delay}\n`;
-								}
-								for (const a of lActions) {
-									const tPin = a.targetPin !== undefined ? a.targetPin : "";
-									const rHold = a.reqHold || a.requiredHoldTime || 0;
-									const aOn = (a.actionOn !== false && a.actionState !== false) ? 1 : 0;
-									const aType = a.actionType || 0;
-									const delay = a.delay || 0;
-									responseText += `RL:${tPin}:${rHold}:${aOn}:${aType}:${delay}\n`;
-								}
 							}
-						}));
-						
+						}
+
 						return new Response(responseText, {
-							headers: { "Content-Type": "text/plain" },
+							headers: {
+								'Content-Type': 'text/plain',
+								'Cache-Control': 'no-store'
+							}
 						});
 					} catch (e) {
-						return new Response("ESP_CFG_V1\n", {
+						return new Response("ESP_CFG_V2\n", {
 							headers: { "Content-Type": "text/plain" },
 						});
 					}
