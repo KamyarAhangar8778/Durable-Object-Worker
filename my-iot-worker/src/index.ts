@@ -87,13 +87,17 @@ export default {
 						let responseText = "ESP_CFG_V2\n";
 
 						const result = await Promise.all(segments.map(async (seg: any) => {
-							const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + seg.pin);
-							const state = await (stub as any).getState();
-							return { config: seg, pin_number: seg.pin, state };
+							try {
+								const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + seg.pin);
+								const state = await (stub as any).getState();
+								return { config: seg, pin_number: seg.pin, state };
+							} catch (e) {
+								return { config: seg, pin_number: seg.pin, state: {} };
+							}
 						}));
 
 						for (const pin of result) {
-							if (pin.config && typeof pin.pin_number === 'number') {
+							if (pin.config && pin.pin_number != null) {
 								// S id=module_1 type=gpio_toggle pin=12 val=0 ao=0
 								responseText += `S id=${pin.config.id} type=${pin.config.type} pin=${pin.pin_number} val=${pin.state?.value ? 1 : 0} ao=${pin.config.autoOffDelay || 0}\n`;
 
