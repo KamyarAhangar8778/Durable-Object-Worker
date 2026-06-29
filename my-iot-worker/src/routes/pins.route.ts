@@ -20,6 +20,28 @@ export async function handlePins(
 		return jsonResponse({ ack: false, error: "Pin ID required" }, 400);
 	}
 
+	if (pinId === "batch" && method === "POST") {
+		try {
+			const body = (await request.json()) as { actions: Array<{ pin: string, state: boolean }> };
+			
+			if (!Array.isArray(body.actions)) {
+				return jsonResponse({ ack: false, error: "Invalid body, 'actions' must be an array" }, 400);
+			}
+
+			await Promise.all(body.actions.map(async (action) => {
+				const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + action.pin);
+				return (stub as any).setState({ value: action.state });
+			}));
+
+			return jsonResponse({
+				ack: true,
+				message: `وضعیت ${body.actions.length} پین با موفقیت به‌روزرسانی شد.`,
+			});
+		} catch (e) {
+			return jsonResponse({ ack: false, error: `خطا در بروزرسانی گروهی پین‌ها.` }, 500);
+		}
+	}
+
 	const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + pinId);
 
 	if (method === "GET") {
