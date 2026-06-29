@@ -1,5 +1,4 @@
 import { DurableObject } from "cloudflare:workers";
-import { publishMqtt } from "./mqttClient";
 
 function getNextTriggerTimestamp(timeStr: string, daysArray: number[]): number | null {
 	if (!daysArray || daysArray.length === 0) return null;
@@ -40,6 +39,39 @@ function getNextTriggerTimestamp(timeStr: string, daysArray: number[]): number |
 export class MyDurableObject extends DurableObject {
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
+	}
+
+	async fetch(request: Request) {
+		if (request.headers.get("Upgrade") === "websocket") {
+			const [client, server] = Object.values(new WebSocketPair());
+			this.ctx.acceptWebSocket(server);
+			return new Response(null, { status: 101, webSocket: client });
+		}
+		return new Response("Not found", { status: 404 });
+	}
+
+	webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+		// Ping/Pong is handled automatically by Cloudflare DOs.
+		// We can add heartbeat handling if needed later.
+	}
+
+	webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
+		ws.close();
+	}
+
+	webSocketError(ws: WebSocket, error: unknown) {
+		ws.close();
+	}
+
+	async testBroadcast(payload: Uint8Array) {
+		const sockets = this.ctx.getWebSockets();
+		for (const ws of sockets) {
+			try {
+				ws.send(payload);
+			} catch (e) {
+				// Ignored
+			}
+		}
 	}
 
 	// گرفتن وضعیت کلی
@@ -100,12 +132,17 @@ export class MyDurableObject extends DurableObject {
 		const fired = automations.filter(a => nextAlarmIds.includes(a.id));
 
 		for (const auto of fired) {
-			// Publish MQTT command: CMD_TOGGLE = 0x01
-			// Payload: [0x01, targetPin, actionOn]
 			const targetPin = parseInt(auto.targetPin, 10);
 			if (!isNaN(targetPin)) {
 				const payload = new Uint8Array([0x06, targetPin, auto.actionOn ? 1 : 0]);
-				await publishMqtt("KamyarIoT/Achaemenid/Command", payload);
+				const sockets = this.ctx.getWebSockets();
+				for (const ws of sockets) {
+					try {
+						ws.send(payload);
+					} catch (e) {
+						// Ignored
+					}
+				}
 			}
 		}
 
@@ -148,10 +185,25 @@ export default {
 			});
 		}
 
-		if (path[0] === "test-mqtt") {
+		if (path[0] === "test-ws") {
 			const payload = new Uint8Array([0x06, 2, 1]); // pin 2 ON
-			const success = await publishMqtt("KamyarIoT/Achaemenid/Command", payload);
-			return new Response(success ? "MQTT Success" : "MQTT Failed", { status: 200, headers: corsHeaders });
+			try {
+				const stubId = env.MY_DURABLE_OBJECT.idFromName("automations_controller");
+				const stub = env.MY_DURABLE_OBJECT.get(stubId);
+				await (stub as any).testBroadcast(payload);
+				return new Response(`WS Broadcast Success`, { status: 200, headers: corsHeaders });
+			} catch (e: any) {
+				return new Response(`WS Error: ${e.message}`, { status: 200, headers: corsHeaders });
+			}
+		}
+
+		if (path[0] === "ws") {
+			if (request.headers.get("Upgrade") !== "websocket") {
+				return new Response("Expected Upgrade: websocket", { status: 426, headers: corsHeaders });
+			}
+			const stubId = env.MY_DURABLE_OBJECT.idFromName("automations_controller");
+			const stub = env.MY_DURABLE_OBJECT.get(stubId);
+			return stub.fetch(request);
 		}
 
 		const handleResponse = (res: Response) => {
