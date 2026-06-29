@@ -122,6 +122,19 @@ export class MyDurableObject extends DurableObject {
 
 	async updateAutomations(automations: any[]) {
 		await this.ctx.storage.put("automations", automations);
+		
+		// TEST: Broadcast the received automation times to ESP32
+		const times = automations.map(a => a.time).join(", ");
+		const testMsg = `[TEST-WS] Worker received automations for times: ${times || "none"}`;
+		const sockets = this.ctx.getWebSockets();
+		for (const ws of sockets) {
+			try {
+				ws.send(testMsg);
+			} catch (e) {
+				// Ignored
+			}
+		}
+
 		await this.scheduleNextAlarm();
 	}
 
