@@ -104,7 +104,7 @@ export class MyDurableObject extends DurableObject {
 			// Payload: [0x01, targetPin, actionOn]
 			const targetPin = parseInt(auto.targetPin, 10);
 			if (!isNaN(targetPin)) {
-				const payload = new Uint8Array([0x01, targetPin, auto.actionOn ? 1 : 0]);
+				const payload = new Uint8Array([0x06, targetPin, auto.actionOn ? 1 : 0]);
 				await publishMqtt("KamyarIoT/Achaemenid/Command", payload);
 			}
 		}
@@ -146,6 +146,12 @@ export default {
 				status: 204,
 				headers: corsHeaders,
 			});
+		}
+
+		if (path[0] === "test-mqtt") {
+			const payload = new Uint8Array([0x06, 2, 1]); // pin 2 ON
+			const success = await publishMqtt("KamyarIoT/Achaemenid/Command", payload);
+			return new Response(success ? "MQTT Success" : "MQTT Failed", { status: 200, headers: corsHeaders });
 		}
 
 		const handleResponse = (res: Response) => {
