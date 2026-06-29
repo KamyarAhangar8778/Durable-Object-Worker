@@ -59,6 +59,14 @@ async function buildEspConfigText(env: Env, value: string | null): Promise<strin
 	);
 
 	let text = "ESP_CFG_V2\n";
+	
+	if (data.mqtt) {
+		const m = data.mqtt;
+		if (m.broker_host && m.base_topic) {
+			text += `M h=${m.broker_host} p=${m.broker_port || 1883} t=${m.base_topic} q=${m.qos || 1}\n`;
+		}
+	}
+
 	for (let i = 0; i < segments.length; i++) {
 		const seg = segments[i];
 		if (!seg || seg.pin == null) continue;
