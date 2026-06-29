@@ -1,10 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 
-function getNextTriggerTimestamp(timeStr: string, daysArray: number[]): number | null {
+function getNextTriggerTimestamp(timeStr: string, daysArray: number[], referenceDate?: Date): number | null {
 	if (!daysArray || daysArray.length === 0) return null;
 	const [hours, minutes] = timeStr.split(':').map(Number);
 	
-	const now = new Date();
+	const now = referenceDate || new Date();
 	const tehranOffsetMs = 3.5 * 60 * 60 * 1000;
 	const nowTehran = new Date(now.getTime() + tehranOffsetMs);
 	
@@ -135,9 +135,10 @@ export class MyDurableObject extends DurableObject {
 		}
 
 		let nextTime = Infinity;
+		const now = new Date(); // Use a single reference date for all calculations
 
 		for (const auto of activeAutomations) {
-			const triggerTime = getNextTriggerTimestamp(auto.time, auto.days);
+			const triggerTime = getNextTriggerTimestamp(auto.time, auto.days, now);
 			if (triggerTime !== null && triggerTime < nextTime) {
 				nextTime = triggerTime;
 			}
@@ -145,7 +146,7 @@ export class MyDurableObject extends DurableObject {
 
 		if (nextTime !== Infinity) {
 			const autoIds = activeAutomations
-				.filter(auto => getNextTriggerTimestamp(auto.time, auto.days) === nextTime)
+				.filter(auto => getNextTriggerTimestamp(auto.time, auto.days, now) === nextTime)
 				.map(auto => auto.id);
 
 			await this.ctx.storage.put("nextAlarmTime", nextTime);
