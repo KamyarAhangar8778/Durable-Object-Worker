@@ -47,12 +47,44 @@ export class MyDurableObject extends DurableObject {
 			this.ctx.acceptWebSocket(server);
 			return new Response(null, { status: 101, webSocket: client });
 		}
+		
+		// Internal route for DO-to-DO communication
+		const url = new URL(request.url);
+		if (url.pathname.startsWith("/pins/")) {
+			const method = request.method;
+			if (method === "POST") {
+				const body = (await request.json()) as Record<string, any>;
+				await this.setState(body);
+				return new Response("OK");
+			}
+		}
+		
 		return new Response("Not found", { status: 404 });
 	}
 
-	webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
-		// Ping/Pong is handled automatically by Cloudflare DOs.
-		// We can add heartbeat handling if needed later.
+	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+		if (typeof message === "string") {
+			try {
+				const data = JSON.parse(message);
+				if (data.type === "sync_pin") {
+					const pinId = data.pin;
+					const state = data.state;
+					
+					// Update the specific pin DO
+					const stubId = this.env.MY_DURABLE_OBJECT.idFromName("pin_" + pinId);
+					const stub = this.env.MY_DURABLE_OBJECT.get(stubId);
+					
+					// Make an internal fetch request to update the pin state
+					const req = new Request(`https://internal/pins/${pinId}`, {
+						method: "POST",
+						body: JSON.stringify({ value: state })
+					});
+					await stub.fetch(req);
+				}
+			} catch (e) {
+				console.error("WS parse error", e);
+			}
+		}
 	}
 
 	webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
