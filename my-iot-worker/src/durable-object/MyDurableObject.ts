@@ -1,6 +1,10 @@
 /**
  * @file durable-object/MyDurableObject.ts
  * Durable Object اصلی: مدیریت WebSocket، state پین‌ها، و اتوماسیون‌ها
+ *
+ * بهینه‌سازی‌های اعمال‌شده:
+ * - ذخیره automations و زمانبندی آلارم + broadcast به‌صورت موازی
+ * - استفاده از ctx.waitUntil برای broadcast (fire-and-forget)
  */
 
 import { DurableObject } from "cloudflare:workers";
@@ -34,17 +38,21 @@ export class MyDurableObject extends DurableObject {
 	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
 		if (typeof message !== "string") return;
 		try {
-			const data = JSON.parse(message);
+			const data = JSON.parse(message) as { type: string; pin: string | number; state: unknown };
 			if (data.type !== "sync_pin") return;
 
 			// به‌روزرسانی DO مربوط به پین از طریق fetch داخلی
-			const stub = this.env.MY_DURABLE_OBJECT.idFromName("pin_" + data.pin);
-			const pinDo = this.env.MY_DURABLE_OBJECT.get(stub);
-			await pinDo.fetch(
-				new Request(`https://internal/pins/${data.pin}`, {
-					method: "POST",
-					body: JSON.stringify({ value: data.state }),
-				})
+			const pinDo = this.env.MY_DURABLE_OBJECT.get(
+				this.env.MY_DURABLE_OBJECT.idFromName("pin_" + data.pin)
+			);
+			// fire-and-forget: نتیجه را به ES32 برنمی‌گردانیم
+			this.ctx.waitUntil(
+				pinDo.fetch(
+					new Request(`https://internal/pins/${data.pin}`, {
+						method: "POST",
+						body: JSON.stringify({ value: data.state }),
+					})
+				)
 			);
 		} catch (e) {
 			console.error("WS parse error", e);
@@ -83,18 +91,25 @@ export class MyDurableObject extends DurableObject {
 		return updated;
 	}
 
-	/** ذخیره اتوماسیون‌ها و زمانبندی آلارم بعدی */
+	/** ذخیره اتوماسیون‌ها و زمانبندی آلارم بعدی — موازی */
 	async updateAutomations(automations: Automation[]): Promise<void> {
+		// ذخیره باید قبل از scheduleNextAlarm باشد (وابستگی داده‌ای)
 		await this.ctx.storage.put("automations", automations);
 
-		// اطلاع به ESP از طریق WebSocket (debug)
+		// broadcast به ESP و زمانبندی آلارم به‌صورت موازی
 		const times = automations.map((a) => a.time).join(", ");
 		const debugMsg = `[TEST-WS] Worker received automations for times: ${times || "none"}`;
-		for (const ws of this.ctx.getWebSockets()) {
-			try { ws.send(debugMsg); } catch { /* ignored */ }
-		}
 
-		await scheduleNextAlarm(this.ctx.storage);
+		await Promise.all([
+			// broadcast (همه sockets را هدف می‌گیرد)
+			Promise.resolve(
+				void this.ctx.getWebSockets().forEach((ws) => {
+					try { ws.send(debugMsg); } catch { /* ignored */ }
+				})
+			),
+			// زمانبندی آلارم بعدی
+			scheduleNextAlarm(this.ctx.storage),
+		]);
 	}
 
 	/** فراخوانی توسط Cloudflare هنگام رسیدن زمان آلارم */

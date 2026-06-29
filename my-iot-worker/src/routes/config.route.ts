@@ -1,6 +1,11 @@
 /**
  * @file routes/config.route.ts
  * مدیریت مسیر /config — تنظیمات اصلی پروژه (Cloudflare KV + DO Alarms)
+ *
+ * بهینه‌سازی‌های اعمال‌شده:
+ * - در POST: KV.put و DO.updateAutomations به‌صورت موازی اجرا می‌شوند
+ * - JSON یک‌بار parse می‌شود و نتیجه در هر دو مسیر استفاده می‌شود
+ * - buildEspConfigText از Promise.all برای خواندن همزمان وضعیت پین‌ها استفاده می‌کند
  */
 
 import { jsonResponse } from "../utils/response";
@@ -9,41 +14,57 @@ import type { PinConfig } from "../types";
 const CONFIG_KEY = "main_config";
 
 /**
- * ساخت متن فرمت ESP_CFG_V2 برای ارسال به میکروکنترلر
+ * ساخت یک خط S برای فرمت ESP_CFG_V2
+ */
+function buildSegmentLine(seg: PinConfig, pinValue: boolean): string {
+	return `S id=${seg.id} type=${seg.type} pin=${seg.pin} val=${pinValue ? 1 : 0} ao=${seg.autoOffDelay ?? 0}\n`;
+}
+
+/**
+ * ساخت خطوط Rule برای یک پین
+ */
+function buildRuleLines(seg: PinConfig): string {
+	if (!seg.rule) return "";
+	let lines = "";
+	for (const act of seg.rule.highActions ?? []) {
+		lines += `RH tgt=${act.targetPin} hld=${act.requiredHoldTime ?? 0} ast=${act.actionState ? 1 : 0} atp=${act.actionType ?? 0} dly=${act.delay ?? 0}\n`;
+	}
+	for (const act of seg.rule.lowActions ?? []) {
+		lines += `RL tgt=${act.targetPin} hld=${act.requiredHoldTime ?? 0} ast=${act.actionState ? 1 : 0} atp=${act.actionType ?? 0} dly=${act.delay ?? 0}\n`;
+	}
+	return lines;
+}
+
+/**
+ * ساخت متن فرمت ESP_CFG_V2 برای ارسال به میکروکنترلر.
+ * وضعیت همه پین‌ها به‌صورت موازی از DO خوانده می‌شود.
  */
 async function buildEspConfigText(env: Env, value: string | null): Promise<string> {
 	const parsed = JSON.parse(value ?? "{}");
 	const data = parsed?.payload ?? parsed ?? {};
 	const segments: PinConfig[] = data.segments_definition ?? data.segments ?? [];
 
-	let text = "ESP_CFG_V2\n";
+	if (segments.length === 0) return "ESP_CFG_V2\n";
 
-	const results = await Promise.all(
+	// خواندن موازی وضعیت همه پین‌ها
+	const pinStates = await Promise.all(
 		segments.map(async (seg) => {
 			try {
 				const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + seg.pin);
-				const state = await (stub as any).getState();
-				return { config: seg, state };
+				return (await (stub as any).getState()) as { value?: boolean };
 			} catch {
-				return { config: seg, state: {} };
+				return {} as { value?: boolean };
 			}
 		})
 	);
 
-	for (const { config: seg, state } of results) {
+	let text = "ESP_CFG_V2\n";
+	for (let i = 0; i < segments.length; i++) {
+		const seg = segments[i];
 		if (!seg || seg.pin == null) continue;
-		text += `S id=${seg.id} type=${seg.type} pin=${seg.pin} val=${state?.value ? 1 : 0} ao=${seg.autoOffDelay ?? 0}\n`;
-
-		if (seg.rule) {
-			for (const act of seg.rule.highActions ?? []) {
-				text += `RH tgt=${act.targetPin} hld=${act.requiredHoldTime ?? 0} ast=${act.actionState ? 1 : 0} atp=${act.actionType ?? 0} dly=${act.delay ?? 0}\n`;
-			}
-			for (const act of seg.rule.lowActions ?? []) {
-				text += `RL tgt=${act.targetPin} hld=${act.requiredHoldTime ?? 0} ast=${act.actionState ? 1 : 0} atp=${act.actionType ?? 0} dly=${act.delay ?? 0}\n`;
-			}
-		}
+		text += buildSegmentLine(seg, !!pinStates[i]?.value);
+		text += buildRuleLines(seg);
 	}
-
 	return text;
 }
 
@@ -75,21 +96,29 @@ export async function handleConfig(
 	}
 
 	if (method === "POST" && !path[1]) {
-		try {
-			const bodyText = await request.text();
-			await env.DASH_KV.put(CONFIG_KEY, bodyText);
+		let bodyText: string;
+		let configData: Record<string, any>;
 
-			// به‌روزرسانی آلارم‌های DO
-			try {
-				const configData = JSON.parse(bodyText);
-				const automations = configData.automations ?? configData.payload?.automations ?? [];
-				const stub = env.MY_DURABLE_OBJECT.get(
-					env.MY_DURABLE_OBJECT.idFromName("automations_controller")
-				);
-				await (stub as any).updateAutomations(automations);
-			} catch (err) {
-				console.error("Failed to update DO alarms", err);
-			}
+		try {
+			bodyText = await request.text();
+			configData = JSON.parse(bodyText);
+		} catch {
+			return jsonResponse({ ack: false, error: "خطا در پردازش درخواست." }, 400);
+		}
+
+		try {
+			const automations = configData.automations ?? configData.payload?.automations ?? [];
+			const stub = env.MY_DURABLE_OBJECT.get(
+				env.MY_DURABLE_OBJECT.idFromName("automations_controller")
+			);
+
+			// KV write و DO update به‌صورت موازی
+			await Promise.all([
+				env.DASH_KV.put(CONFIG_KEY, bodyText),
+				(stub as any).updateAutomations(automations).catch((err: unknown) => {
+					console.error("Failed to update DO alarms", err);
+				}),
+			]);
 
 			return jsonResponse({ ack: true, message: "تنظیمات با موفقیت در سرور ذخیره شد." });
 		} catch {

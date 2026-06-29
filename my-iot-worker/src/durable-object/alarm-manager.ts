@@ -1,13 +1,27 @@
 /**
  * @file durable-object/alarm-manager.ts
  * منطق زمانبندی و اجرای اتوماسیون‌ها از طریق DO Alarms
+ *
+ * بهینه‌سازی‌های اعمال‌شده:
+ * - محاسبه timestamp در یک پاس (به جای دو پاس قبلی)
+ * - نوشتن storage و setAlarm به‌صورت موازی با Promise.all
+ * - خواندن automations و nextAlarmIds به‌صورت موازی در fireAlarm
  */
 
 import { getNextTriggerTimestamp } from "../utils/scheduler";
 import type { Automation } from "../types";
 
+/** ساختار داخلی برای نگه‌داشتن زمان محاسبه‌شده هر اتوماسیون */
+interface ScheduledEntry {
+	id: string;
+	ts: number;
+}
+
 /**
- * محاسبه و ثبت آلارم بعدی بر اساس لیست اتوماسیون‌های فعال
+ * محاسبه و ثبت آلارم بعدی بر اساس لیست اتوماسیون‌های فعال.
+ *
+ * بهینه‌سازی: همه timestamp ها در یک پاس محاسبه می‌شوند،
+ * و نوشتن به storage و setAlarm به‌صورت موازی اجرا می‌شود.
  */
 export async function scheduleNextAlarm(storage: DurableObjectStorage): Promise<void> {
 	const automations = (await storage.get<Automation[]>("automations")) ?? [];
@@ -18,48 +32,55 @@ export async function scheduleNextAlarm(storage: DurableObjectStorage): Promise<
 		return;
 	}
 
+	// یک پاس: محاسبه timestamp برای همه اتوماسیون‌های فعال
 	const now = new Date();
-	let nextTime = Infinity;
+	const scheduled: ScheduledEntry[] = activeAutomations
+		.map((auto) => ({ id: auto.id, ts: getNextTriggerTimestamp(auto.time, auto.days, now) }))
+		.filter((entry): entry is ScheduledEntry => entry.ts !== null);
 
-	for (const auto of activeAutomations) {
-		const triggerTime = getNextTriggerTimestamp(auto.time, auto.days, now);
-		if (triggerTime !== null && triggerTime < nextTime) {
-			nextTime = triggerTime;
-		}
-	}
-
-	if (nextTime === Infinity) {
+	if (scheduled.length === 0) {
 		await storage.deleteAlarm();
 		return;
 	}
 
-	const nextAlarmIds = activeAutomations
-		.filter((auto) => getNextTriggerTimestamp(auto.time, auto.days, now) === nextTime)
-		.map((auto) => auto.id);
+	// پیدا کردن نزدیک‌ترین زمان
+	const nextTime = Math.min(...scheduled.map((e) => e.ts));
+	const nextAlarmIds = scheduled.filter((e) => e.ts === nextTime).map((e) => e.id);
 
-	await storage.put("nextAlarmTime", nextTime);
-	await storage.put("nextAlarmIds", nextAlarmIds);
-	await storage.setAlarm(nextTime);
+	// نوشتن storage و ثبت آلارم به‌صورت موازی
+	await Promise.all([
+		storage.put("nextAlarmTime", nextTime),
+		storage.put("nextAlarmIds", nextAlarmIds),
+		storage.setAlarm(nextTime),
+	]);
 }
 
 /**
- * اجرای اتوماسیون‌هایی که الان باید فعال شوند و ارسال payload به ESP از طریق WebSocket
+ * اجرای اتوماسیون‌هایی که الان باید فعال شوند و ارسال payload به ESP از طریق WebSocket.
+ *
+ * بهینه‌سازی: خواندن automations و nextAlarmIds به‌صورت موازی.
  */
 export async function fireAlarm(
 	storage: DurableObjectStorage,
 	getWebSockets: () => WebSocket[]
 ): Promise<void> {
-	const automations = (await storage.get<Automation[]>("automations")) ?? [];
-	const nextAlarmIds = (await storage.get<string[]>("nextAlarmIds")) ?? [];
+	// خواندن موازی از storage
+	const [automations, nextAlarmIds] = await Promise.all([
+		storage.get<Automation[]>("automations").then((v) => v ?? []),
+		storage.get<string[]>("nextAlarmIds").then((v) => v ?? []),
+	]);
 
-	const fired = automations.filter((a) => nextAlarmIds.includes(a.id));
+	const idSet = new Set(nextAlarmIds);
+	const fired = automations.filter((a) => idSet.has(a.id));
+	const sockets = getWebSockets();
 
+	// ارسال payload برای هر اتوماسیون فعال‌شده
 	for (const auto of fired) {
 		const targetPin = parseInt(auto.targetPin, 10);
 		if (isNaN(targetPin)) continue;
 
 		const payload = new Uint8Array([0x06, targetPin, auto.actionOn ? 1 : 0]);
-		for (const ws of getWebSockets()) {
+		for (const ws of sockets) {
 			try {
 				ws.send(payload);
 			} catch {
