@@ -65,9 +65,10 @@ export async function fireAlarm(
 	getWebSockets: () => WebSocket[]
 ): Promise<void> {
 	// خواندن موازی از storage
-	const [automations, nextAlarmIds] = await Promise.all([
+	const [automations, nextAlarmIds, macros] = await Promise.all([
 		storage.get<Automation[]>("automations").then((v) => v ?? []),
 		storage.get<string[]>("nextAlarmIds").then((v) => v ?? []),
+		storage.get<import("../types").Macro[]>("macros").then((v) => v ?? []),
 	]);
 
 	const idSet = new Set(nextAlarmIds);
@@ -76,10 +77,37 @@ export async function fireAlarm(
 
 	// ارسال payload برای هر اتوماسیون فعال‌شده
 	for (const auto of fired) {
-		const targetPin = parseInt(auto.targetPin, 10);
-		if (isNaN(targetPin)) continue;
+		const allPins: { pin: number; state: boolean }[] = [];
 
-		const payload = new Uint8Array([0x06, targetPin, auto.actionOn ? 1 : 0]);
+		if (auto.actions) {
+			for (const action of auto.actions) {
+				if (action.targetMacro) {
+					const m = macros.find(m => m.id === action.targetMacro);
+					if (m && m.actions) {
+						for (const ma of m.actions) {
+							const pin = parseInt(ma.targetPin, 10);
+							if (!isNaN(pin)) allPins.push({ pin, state: !!ma.actionOn });
+						}
+					}
+				} else if (action.targetPin) {
+					const pin = parseInt(action.targetPin, 10);
+					if (!isNaN(pin)) allPins.push({ pin, state: !!action.actionOn });
+				}
+			}
+		}
+
+		if (allPins.length === 0) continue;
+
+		// ساختن کامند 0x08
+		const count = Math.min(allPins.length, 32);
+		const payload = new Uint8Array(2 + count * 2);
+		payload[0] = 0x08;
+		payload[1] = count;
+		for (let i = 0; i < count; i++) {
+			payload[2 + i * 2] = allPins[i].pin;
+			payload[3 + i * 2] = allPins[i].state ? 1 : 0;
+		}
+
 		for (const ws of sockets) {
 			try {
 				ws.send(payload);

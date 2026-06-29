@@ -92,9 +92,12 @@ export class MyDurableObject extends DurableObject {
 	}
 
 	/** ذخیره اتوماسیون‌ها و زمانبندی آلارم بعدی — موازی */
-	async updateAutomations(automations: Automation[]): Promise<void> {
+	async updateAutomations(automations: Automation[], macros: import("../types").Macro[] = []): Promise<void> {
 		// ذخیره باید قبل از scheduleNextAlarm باشد (وابستگی داده‌ای)
-		await this.ctx.storage.put("automations", automations);
+		await Promise.all([
+			this.ctx.storage.put("automations", automations),
+			this.ctx.storage.put("macros", macros)
+		]);
 
 		// broadcast به ESP و زمانبندی آلارم به‌صورت موازی
 		const times = automations.map((a) => a.time).join(", ");

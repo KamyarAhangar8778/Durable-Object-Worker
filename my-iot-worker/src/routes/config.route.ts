@@ -116,6 +116,7 @@ export async function handleConfig(
 
 		try {
 			const automations = configData.automations ?? configData.payload?.automations ?? [];
+			const macros = configData.macros ?? configData.payload?.macros ?? [];
 			const stub = env.MY_DURABLE_OBJECT.get(
 				env.MY_DURABLE_OBJECT.idFromName("automations_controller")
 			);
@@ -123,7 +124,7 @@ export async function handleConfig(
 			// KV write و DO update به‌صورت موازی
 			await Promise.all([
 				env.DASH_KV.put(CONFIG_KEY, bodyText),
-				(stub as any).updateAutomations(automations).catch((err: unknown) => {
+				(stub as any).updateAutomations(automations, macros).catch((err: unknown) => {
 					console.error("Failed to update DO alarms", err);
 				}),
 			]);

@@ -38,6 +38,19 @@ export interface Automation {
 	time: string;
 	days: number[];
 	enabled: boolean;
-	targetPin: string;
-	actionOn: boolean;
+	actions: Array<{
+		targetPin?: string;
+		targetMacro?: string;
+		actionOn?: boolean;
+	}>;
+}
+
+/** یک ماکرو (دکمه سفارشی) */
+export interface Macro {
+	id: string;
+	title: string;
+	actions: Array<{
+		targetPin: string;
+		actionOn: boolean;
+	}>;
 }
