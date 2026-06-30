@@ -115,6 +115,9 @@ export async function fireAlarm(
 				// اتصال قطع شده — نادیده گرفته می‌شود
 			}
 		}
+
+		// ذخیره وضعیت پین‌ها تا با دریافت فیدبک، مقدار نهایی در DO آپدیت شود
+		await storage.put("pending_automation_states", allPins);
 	}
 
 	// آلارم بعدی را برنامه‌ریزی کن

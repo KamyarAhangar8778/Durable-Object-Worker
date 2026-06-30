@@ -41,6 +41,24 @@ export class MyDurableObject extends DurableObject {
 			const data = JSON.parse(message) as { type: string; pin?: string | number; state?: unknown; status?: string };
 			if (data.type === "automation_ack") {
 				console.log(`[Automation] Feedback received from ESP32: ${data.status}`);
+				// اعمال تغییرات در DO
+				const pending = await this.ctx.storage.get<{ pin: number; state: boolean }[]>("pending_automation_states");
+				if (pending) {
+					for (const p of pending) {
+						const pinDo = this.env.MY_DURABLE_OBJECT.get(
+							this.env.MY_DURABLE_OBJECT.idFromName("pin_" + p.pin)
+						);
+						this.ctx.waitUntil(
+							pinDo.fetch(
+								new Request(`https://internal/pins/${p.pin}`, {
+									method: "POST",
+									body: JSON.stringify({ value: p.state }),
+								})
+							)
+						);
+					}
+					await this.ctx.storage.delete("pending_automation_states");
+				}
 				return;
 			}
 			if (data.type !== "sync_pin") return;
