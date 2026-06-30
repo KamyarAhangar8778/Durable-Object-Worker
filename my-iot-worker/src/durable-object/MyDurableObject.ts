@@ -38,7 +38,11 @@ export class MyDurableObject extends DurableObject {
 	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
 		if (typeof message !== "string") return;
 		try {
-			const data = JSON.parse(message) as { type: string; pin: string | number; state: unknown };
+			const data = JSON.parse(message) as { type: string; pin?: string | number; state?: unknown; status?: string };
+			if (data.type === "automation_ack") {
+				console.log(`[Automation] Feedback received from ESP32: ${data.status}`);
+				return;
+			}
 			if (data.type !== "sync_pin") return;
 
 			// به‌روزرسانی DO مربوط به پین از طریق fetch داخلی
