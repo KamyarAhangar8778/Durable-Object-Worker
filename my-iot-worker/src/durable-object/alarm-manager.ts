@@ -9,6 +9,7 @@
  */
 
 import { getNextTriggerTimestamp } from "../utils/scheduler";
+import { getCurrentTemperature } from "../utils/weather";
 import type { Automation } from "../types";
 
 /** ساختار داخلی برای نگه‌داشتن زمان محاسبه‌شده هر اتوماسیون */
@@ -74,9 +75,36 @@ export async function fireAlarm(
 	const idSet = new Set(nextAlarmIds);
 	const fired = automations.filter((a) => idSet.has(a.id));
 	const sockets = getWebSockets();
+	let automationsChanged = false;
 
 	// ارسال payload برای هر اتوماسیون فعال‌شده
 	for (const auto of fired) {
+		// --- بررسی شرط آب‌وهوا ---
+		if (auto.conditionType === "weather" && auto.city) {
+			const currentTemp = await getCurrentTemperature(auto.city);
+			if (currentTemp !== null && auto.temperatureThreshold !== undefined) {
+				const isGreater = auto.temperatureCondition === "greater";
+				const conditionMet = isGreater 
+					? currentTemp > auto.temperatureThreshold 
+					: currentTemp < auto.temperatureThreshold;
+				
+				if (!conditionMet) {
+					console.log(`[Automation] Skipped ${auto.id} due to weather condition (${currentTemp}°C vs threshold ${auto.temperatureThreshold}°C)`);
+					continue;
+				}
+			}
+		}
+
+		// --- به‌روزرسانی تعداد تکرار (یک‌بار مصرف) ---
+		if (auto.repeatCount !== undefined && auto.repeatCount > 0) {
+			auto.repeatCount -= 1;
+			automationsChanged = true;
+			if (auto.repeatCount === 0) {
+				auto.enabled = false;
+				console.log(`[Automation] Disabled ${auto.id} as repeatCount reached 0.`);
+			}
+		}
+
 		const allPins: { pin: number; state: boolean }[] = [];
 
 		if (auto.actions) {
@@ -118,6 +146,11 @@ export async function fireAlarm(
 
 		// ذخیره وضعیت پین‌ها تا با دریافت فیدبک، مقدار نهایی در DO آپدیت شود
 		await storage.put("pending_automation_states", allPins);
+	}
+
+	// ذخیره تغییرات اتوماسیون‌ها (مانند غیرفعال شدن اتوماسیون‌های یک‌بار مصرف)
+	if (automationsChanged) {
+		await storage.put("automations", automations);
 	}
 
 	// آلارم بعدی را برنامه‌ریزی کن

@@ -38,6 +38,11 @@ export interface Automation {
 	time: string;
 	days: number[];
 	enabled: boolean;
+	repeatCount?: number;
+	conditionType?: 'time' | 'weather';
+	city?: string;
+	temperatureThreshold?: number;
+	temperatureCondition?: 'greater' | 'less';
 	actions: Array<{
 		targetPin?: string;
 		targetMacro?: string;
