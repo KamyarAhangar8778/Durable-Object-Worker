@@ -67,6 +67,14 @@ async function buildEspConfigText(env: Env, value: string | null): Promise<strin
 		}
 	}
 
+	if (data.wifi && Array.isArray(data.wifi.networks)) {
+		for (const net of data.wifi.networks) {
+			if (net.ssid && net.password) {
+				text += `W s=${net.ssid} p=${net.password}\n`;
+			}
+		}
+	}
+
 	for (let i = 0; i < segments.length; i++) {
 		const seg = segments[i];
 		if (!seg || seg.pin == null) continue;
