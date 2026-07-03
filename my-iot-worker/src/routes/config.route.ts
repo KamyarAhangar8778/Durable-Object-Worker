@@ -63,7 +63,7 @@ async function buildEspConfigText(env: Env, value: string | null): Promise<strin
 	if (data.mqtt) {
 		const m = data.mqtt;
 		if (m.broker_host && m.base_topic) {
-			text += `M h=${m.broker_host} p=${m.broker_port || 1883} t=${m.base_topic} q=${m.qos || 1}\n`;
+			text += `M h=${m.broker_host} p=${m.broker_port || 1883} t=${m.base_topic} q=${m.qos ?? 1}\n`;
 		}
 	}
 
