@@ -36,7 +36,7 @@ export async function scheduleNextAlarm(storage: DurableObjectStorage): Promise<
 	// یک پاس: محاسبه timestamp برای همه اتوماسیون‌های فعال
 	const now = new Date();
 	const scheduled: ScheduledEntry[] = activeAutomations
-		.map((auto) => ({ id: auto.id, ts: getNextTriggerTimestamp(auto.time, auto.days, now) }))
+		.map((auto) => ({ id: auto.id, ts: getNextTriggerTimestamp(auto.time, auto.days, now, auto.intervalMinutes) }))
 		.filter((entry): entry is ScheduledEntry => entry.ts !== null);
 
 	if (scheduled.length === 0) {

@@ -17,12 +17,18 @@ const TEHRAN_OFFSET_MS = 3.5 * 60 * 60 * 1000;
 export function getNextTriggerTimestamp(
 	timeStr: string,
 	daysArray: number[],
-	referenceDate?: Date
+	referenceDate?: Date,
+	intervalMinutes?: number
 ): number | null {
+	const now = referenceDate ?? new Date();
+
+	if (intervalMinutes && intervalMinutes > 0) {
+		return now.getTime() + intervalMinutes * 60 * 1000;
+	}
+
 	if (!daysArray || daysArray.length === 0) return null;
 
 	const [hours, minutes] = timeStr.split(":").map(Number);
-	const now = referenceDate ?? new Date();
 	const nowTehran = new Date(now.getTime() + TEHRAN_OFFSET_MS);
 
 	let bestDelay = Infinity;

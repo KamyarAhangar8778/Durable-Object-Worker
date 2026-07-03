@@ -39,6 +39,7 @@ export interface Automation {
 	days: number[];
 	enabled: boolean;
 	repeatCount?: number;
+	intervalMinutes?: number;
 	conditionType?: 'time' | 'weather';
 	city?: string;
 	temperatureThreshold?: number;
