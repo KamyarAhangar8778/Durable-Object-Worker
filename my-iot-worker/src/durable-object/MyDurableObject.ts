@@ -9,6 +9,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { scheduleNextAlarm, fireAlarm } from "./alarm-manager";
+import { buildEspConfigText } from "../routes/config.route";
 import type { Automation } from "../types";
 
 export class MyDurableObject extends DurableObject {
@@ -39,6 +40,15 @@ export class MyDurableObject extends DurableObject {
 		if (typeof message !== "string") return;
 		try {
 			const data = JSON.parse(message) as { type: string; pin?: string | number; state?: unknown; status?: string };
+			
+			if (data.type === "get_config") {
+				console.log("[WebSocket] Config requested by ESP32");
+				const value = await this.env.DASH_KV.get("main_config");
+				const configText = await buildEspConfigText(this.env, value);
+				ws.send(configText);
+				return;
+			}
+			
 			if (data.type === "automation_ack") {
 				console.log(`[Automation] Feedback received from ESP32: ${data.status}`);
 				// اعمال تغییرات در DO

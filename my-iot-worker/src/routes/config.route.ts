@@ -39,7 +39,7 @@ function buildRuleLines(seg: PinConfig): string {
  * ساخت متن فرمت ESP_CFG_V2 برای ارسال به میکروکنترلر.
  * وضعیت همه پین‌ها به‌صورت موازی از DO خوانده می‌شود.
  */
-async function buildEspConfigText(env: Env, value: string | null): Promise<string> {
+export async function buildEspConfigText(env: Env, value: string | null): Promise<string> {
 	const parsed = JSON.parse(value ?? "{}");
 	const data = parsed?.payload ?? parsed ?? {};
 	const segments: PinConfig[] = data.segments_definition ?? data.segments ?? [];
