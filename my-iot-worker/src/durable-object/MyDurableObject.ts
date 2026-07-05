@@ -59,12 +59,7 @@ export class MyDurableObject extends DurableObject {
 							this.env.MY_DURABLE_OBJECT.idFromName("pin_" + p.pin)
 						);
 						this.ctx.waitUntil(
-							pinDo.fetch(
-								new Request(`https://internal/pins/${p.pin}`, {
-									method: "POST",
-									body: JSON.stringify({ value: p.state }),
-								})
-							)
+							(pinDo as any).setState({ value: p.state })
 						);
 					}
 					await this.ctx.storage.delete("pending_automation_states");
@@ -73,18 +68,13 @@ export class MyDurableObject extends DurableObject {
 			}
 			if (data.type !== "sync_pin") return;
 
-			// به‌روزرسانی DO مربوط به پین از طریق fetch داخلی
+			// به‌روزرسانی DO مربوط به پین از طریق RPC مستقیم
 			const pinDo = this.env.MY_DURABLE_OBJECT.get(
 				this.env.MY_DURABLE_OBJECT.idFromName("pin_" + data.pin)
 			);
-			// fire-and-forget: نتیجه را به ES32 برنمی‌گردانیم
+			// fire-and-forget: اجرای متد با RPC بدون overhead شبکه داخلی
 			this.ctx.waitUntil(
-				pinDo.fetch(
-					new Request(`https://internal/pins/${data.pin}`, {
-						method: "POST",
-						body: JSON.stringify({ value: data.state }),
-					})
-				)
+				(pinDo as any).setState({ value: data.state })
 			);
 		} catch (e) {
 			console.error("WS parse error", e);

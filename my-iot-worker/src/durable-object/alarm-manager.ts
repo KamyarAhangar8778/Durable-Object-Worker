@@ -77,11 +77,21 @@ export async function fireAlarm(
 	const sockets = getWebSockets();
 	let automationsChanged = false;
 
+	// کشِ دیتای آب‌وهوا برای جلوگیری از ریکوئست‌های تکراری در یک دوره‌ی اجرای آلارم
+	const weatherCache = new Map<string, number | null>();
+
 	// ارسال payload برای هر اتوماسیون فعال‌شده
 	for (const auto of fired) {
 		// --- بررسی شرط آب‌وهوا ---
 		if (auto.conditionType === "weather" && auto.city) {
-			const currentTemp = await getCurrentTemperature(auto.city);
+			let currentTemp: number | null = null;
+			if (weatherCache.has(auto.city)) {
+				currentTemp = weatherCache.get(auto.city) ?? null;
+			} else {
+				currentTemp = await getCurrentTemperature(auto.city);
+				weatherCache.set(auto.city, currentTemp);
+			}
+			
 			if (currentTemp !== null && auto.temperatureThreshold !== undefined) {
 				const isGreater = auto.temperatureCondition === "greater";
 				const conditionMet = isGreater 
