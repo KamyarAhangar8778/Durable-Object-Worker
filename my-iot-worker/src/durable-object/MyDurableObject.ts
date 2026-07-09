@@ -48,6 +48,37 @@ export class MyDurableObject extends DurableObject {
 				ws.send(configText);
 				return;
 			}
+
+			if (data.type === "get_all_states") {
+				console.log("[WebSocket] get_all_states requested by ESP32");
+				const configValue = await this.env.DASH_KV.get("main_config");
+				if (!configValue) return;
+
+				const parsed = JSON.parse(configValue);
+				const configData = parsed?.payload ?? parsed ?? {};
+				const segments = configData.segments_definition ?? configData.segments ?? [];
+				const states: Record<string, boolean> = {};
+
+				await Promise.all(
+					segments.map(async (seg: any) => {
+						try {
+							if (seg && seg.pin != null) {
+								const stub = this.env.MY_DURABLE_OBJECT.get(
+									this.env.MY_DURABLE_OBJECT.idFromName("pin_" + seg.pin)
+								);
+								const state = await (stub as any).getState();
+								states[String(seg.pin)] = state?.value === true;
+							}
+						} catch {}
+					})
+				);
+
+				ws.send(JSON.stringify({
+					type: "state_sync",
+					states: states
+				}));
+				return;
+			}
 			
 			if (data.type === "automation_ack") {
 				console.log(`[Automation] Feedback received from ESP32: ${data.status}`);
