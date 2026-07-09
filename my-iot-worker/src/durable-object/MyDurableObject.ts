@@ -79,6 +79,22 @@ export class MyDurableObject extends DurableObject {
 				}));
 				return;
 			}
+
+			if (data.type === "state_sync") {
+				console.log("[WebSocket] state_sync received from ESP32");
+				const states = (data as any).states;
+				if (states && typeof states === "object") {
+					for (const [pinStr, stateVal] of Object.entries(states)) {
+						const pinDo = this.env.MY_DURABLE_OBJECT.get(
+							this.env.MY_DURABLE_OBJECT.idFromName("pin_" + pinStr)
+						);
+						this.ctx.waitUntil(
+							(pinDo as any).setState({ value: stateVal === true })
+						);
+					}
+				}
+				return;
+			}
 			
 			if (data.type === "automation_ack") {
 				console.log(`[Automation] Feedback received from ESP32: ${data.status}`);
