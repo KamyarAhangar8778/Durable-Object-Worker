@@ -69,8 +69,8 @@ export async function buildEspConfigText(env: Env, value: string | null): Promis
 
 	if (data.wifi && Array.isArray(data.wifi.networks)) {
 		for (const net of data.wifi.networks) {
-			if (net.ssid && net.password) {
-				text += `W s=${net.ssid} p=${net.password}\n`;
+			if (net.ssid) {
+				text += `W s=${net.ssid} p=${net.password ?? ""}\n`;
 			}
 		}
 	}
@@ -129,12 +129,18 @@ export async function handleConfig(
 				env.MY_DURABLE_OBJECT.idFromName("automations_controller")
 			);
 
-			// KV write و DO update به‌صورت موازی
+			// KV write، DO update و broadcast کانفیگ به ESP به‌صورت موازی
+			const configTextPromise = buildEspConfigText(env, bodyText);
 			await Promise.all([
 				env.DASH_KV.put(CONFIG_KEY, bodyText),
 				(stub as any).updateAutomations(automations, macros).catch((err: unknown) => {
 					console.error("Failed to update DO alarms", err);
 				}),
+				configTextPromise.then((text) =>
+					(stub as any).broadcastConfig(text).catch((err: unknown) => {
+						console.error("Failed to broadcast config to DO", err);
+					})
+				),
 			]);
 
 			return jsonResponse({ ack: true, message: "تنظیمات با موفقیت در سرور ذخیره شد." });

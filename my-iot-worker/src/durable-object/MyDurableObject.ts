@@ -147,6 +147,17 @@ export class MyDurableObject extends DurableObject {
 		}
 	}
 
+	/** ارسال متن کانفیگ ESP_CFG_V2 به تمام سخت‌افزارهای متصل به صورت بلادرنگ */
+	async broadcastConfig(configText: string): Promise<void> {
+		for (const ws of this.ctx.getWebSockets()) {
+			try {
+				ws.send(configText);
+			} catch {
+				// اتصال قطع شده — نادیده گرفته می‌شود
+			}
+		}
+	}
+
 	/** گرفتن وضعیت کلی از storage */
 	async getState(): Promise<Record<string, unknown>> {
 		return ((await this.ctx.storage.get("data")) as Record<string, unknown>) ?? {};
