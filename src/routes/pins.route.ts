@@ -29,7 +29,9 @@ export async function handlePins(
 			}
 
 			await Promise.all(body.actions.map(async (action) => {
-				const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + action.pin);
+				const stub = (env.MY_DURABLE_OBJECT as any).getByName
+					? (env.MY_DURABLE_OBJECT as any).getByName("pin_" + action.pin)
+					: env.MY_DURABLE_OBJECT.get(env.MY_DURABLE_OBJECT.idFromName("pin_" + action.pin));
 				return (stub as any).setState({ value: action.state });
 			}));
 
@@ -60,7 +62,9 @@ export async function handlePins(
 		}
 	}
 
-	const stub = env.MY_DURABLE_OBJECT.getByName("pin_" + pinId);
+	const stub = (env.MY_DURABLE_OBJECT as any).getByName
+		? (env.MY_DURABLE_OBJECT as any).getByName("pin_" + pinId)
+		: env.MY_DURABLE_OBJECT.get(env.MY_DURABLE_OBJECT.idFromName("pin_" + pinId));
 
 	if (method === "GET") {
 		const result = await (stub as any).getState();

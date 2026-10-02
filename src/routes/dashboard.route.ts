@@ -13,7 +13,9 @@ export async function handleDashboard(
 	env: Env,
 	method: string
 ): Promise<Response> {
-	const stub = env.MY_DURABLE_OBJECT.getByName("dashboard_state");
+	const stub = (env.MY_DURABLE_OBJECT as any).getByName
+		? (env.MY_DURABLE_OBJECT as any).getByName("dashboard_state")
+		: env.MY_DURABLE_OBJECT.get(env.MY_DURABLE_OBJECT.idFromName("dashboard_state"));
 
 	if (method === "GET") {
 		const result = await (stub as any).getState();

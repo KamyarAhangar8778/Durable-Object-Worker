@@ -109,8 +109,35 @@ export async function handleConfig(
 			}
 		}
 
-		// برای داشبورد: کل JSON تنظیمات
-		return new Response(value ?? "{}", { headers: { "Content-Type": "application/json" } });
+		// برای داشبورد: تزریق وضعیت زنده پین‌ها از Durable Objects به JSON تنظیمات
+		if (value) {
+			try {
+				const parsed = JSON.parse(value);
+				const configData = parsed?.payload ?? parsed ?? {};
+				const segments = configData.segments_definition ?? configData.segments ?? [];
+				if (Array.isArray(segments) && segments.length > 0) {
+					await Promise.all(
+						segments.map(async (seg: any) => {
+							try {
+								if (seg && seg.pin != null) {
+									const stub = env.MY_DURABLE_OBJECT.get(
+										env.MY_DURABLE_OBJECT.idFromName("pin_" + seg.pin)
+									);
+									const state = await (stub as any).getState();
+									const val = state?.value;
+									seg.state = val === true || val === 1 || val === "true" || val === "1";
+								}
+							} catch {}
+						})
+					);
+				}
+				return jsonResponse(parsed);
+			} catch {
+				return new Response(value, { headers: { "Content-Type": "application/json" } });
+			}
+		}
+
+		return new Response("{}", { headers: { "Content-Type": "application/json" } });
 	}
 
 	if (method === "POST" && !path[1]) {
